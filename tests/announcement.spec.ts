@@ -77,7 +77,7 @@ function makeHarness(options: {
 describe('service announcement', () => {
   it('resolves the explicit session pin and its stored credential', async () => {
     const { scheduler, announcement, ctx } = makeHarness({ affinity: false })
-    expect(await announcement.getActiveAccount('example', ctx)).toBeUndefined()
+    expect(await announcement.getActiveAccount('example', ctx)).toMatchObject({ id: PI_UPSTREAM_ACCOUNT_ID })
     await scheduler.pinAccount('example', 'session-1', 'a')
     expect(await announcement.getActiveAccount('example', ctx)).toEqual({
       id: 'a',
@@ -113,6 +113,21 @@ describe('service announcement', () => {
       authKind: 'custom',
     })
     expect(await announcement.resolveActiveAccountAuth('example', ctx)).toBeUndefined()
+  })
+
+  it('guesses upstream, then the first ready account, before any selection', async () => {
+    const { scheduler, announcement, ctx } = makeHarness({ affinity: false })
+    expect(await announcement.getActiveAccount('example', ctx)).toMatchObject({ id: PI_UPSTREAM_ACCOUNT_ID })
+    expect(await announcement.resolveActiveAccountAuth('example', ctx)).toBeUndefined()
+    await scheduler.updatePool('example', {
+      accounts: [{ accountId: PI_UPSTREAM_ACCOUNT_ID, enabled: false, weight: 1, priority: 0 }],
+    })
+    expect(await announcement.getActiveAccount('example', ctx)).toMatchObject({ id: 'a' })
+    expect(await announcement.resolveActiveAccountAuth('example', ctx)).toMatchObject({ accountId: 'a' })
+    await scheduler.updatePool('example', {
+      accounts: ['pi:default', 'a', 'b'].map(accountId => ({ accountId, enabled: false, weight: 1, priority: 0 })),
+    })
+    expect(await announcement.getActiveAccount('example', ctx)).toBeUndefined()
   })
 
   it('extracts bearer tokens from headers and tolerates resolver failures', async () => {
@@ -168,7 +183,7 @@ describe('service announcement', () => {
     expect(announcement.hasPool?.('missing')).toBe(false)
     expect(readAccounts).not.toHaveBeenCalled()
     expect(resolveAuth).not.toHaveBeenCalled()
-    expect(await announcement.getActiveAccount('example', ctx)).toBeUndefined()
+    expect(await announcement.getActiveAccount('example', ctx)).toMatchObject({ id: PI_UPSTREAM_ACCOUNT_ID })
     scheduler.registerProvider({ id: 'scheduler-only', label: 'Only', accounts: () => accounts })
     expect(announcement.hasPool?.('scheduler-only')).toBe(false)
     unregister()

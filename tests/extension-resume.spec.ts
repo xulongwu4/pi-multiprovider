@@ -226,7 +226,7 @@ describe('/switch-account survival across resume', () => {
   it('journals a switch in the session and restores it when a fresh runtime resumes', async () => {
     const live = await launch([])
     await live.start()
-    expect(await live.active('example')).toBeUndefined()
+    expect(await live.active('example')).toMatchObject({ id: 'pi:default' }) // automatic: upstream guess
     await live.switchAccount('personal')
     expect(journal(live.entries)).toEqual([
       { pool: 'example', key: 'session-1', accountId: personal.id, label: 'Personal' },
@@ -258,20 +258,20 @@ describe('/switch-account survival across resume', () => {
   it('stays automatic without a journal and does not resurrect a cleared pin', async () => {
     const plain = await launch([])
     await plain.start()
-    expect(await plain.active('example')).toBeUndefined()
+    expect(await plain.active('example')).toMatchObject({ id: 'pi:default' }) // automatic: upstream guess
 
     const live = await launch([])
     await live.start()
     await live.switchAccount('personal')
     await live.switchAccount('auto')
-    expect(await live.active('example')).toBeUndefined()
+    expect(await live.active('example')).toMatchObject({ id: 'pi:default' }) // automatic: upstream guess
 
     const afterClear = await launch(live.entries)
     await afterClear.start()
-    expect(await afterClear.active('example')).toBeUndefined()
-    // A cleared decision replays as "automatic", so followers drop the account
-    // the session used before instead of keeping it on screen.
-    expect(afterClear.accountChanges.map(event => event.account)).toEqual([undefined])
+    expect(await afterClear.active('example')).toMatchObject({ id: 'pi:default' }) // automatic: upstream guess
+    // A cleared decision replays as "automatic", so followers switch to the
+    // automatic guess instead of keeping the previously pinned account on screen.
+    expect(afterClear.accountChanges.map(event => event.account)).toMatchObject([{ id: 'pi:default' }])
   })
 
   it('falls back to automatic and warns when the pinned account is gone', async () => {
@@ -285,7 +285,7 @@ describe('/switch-account survival across resume', () => {
       timestamp: new Date().toISOString(),
     }])
     await pinned.start()
-    expect(await pinned.active('example')).toBeUndefined()
+    expect(await pinned.active('example')).toMatchObject({ id: 'pi:default' }) // automatic: upstream guess
     expect(pinned.notifications.filter(message => message.includes('"Deleted" could not be restored'))).toHaveLength(1)
     expect(pinned.accountChanges).toEqual([])
     expect(await removed.listProviderIds()).toContain('example')
@@ -327,7 +327,7 @@ describe('/switch-account survival across resume', () => {
         timestamp: new Date().toISOString(),
       }])
       await child.start()
-      expect(await child.active('example')).toBeUndefined()
+      expect(await child.active('example')).toMatchObject({ id: 'pi:default' }) // automatic: upstream guess
       expect(journal(child.entries)).toEqual([{ pool: 'example', key: 'child-session' }])
     } finally {
       if (previous === undefined) delete process.env.PI_MULTIPROVIDER_SESSION_PINS

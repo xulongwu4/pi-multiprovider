@@ -49,7 +49,8 @@ function bearerTokenFromHeaders(headers: ProviderHeaders | undefined): string | 
 
 // Builds the in-process service announced on MULTIPROVIDER_SERVICE_EVENT. The
 // active account is the session's explicit /switch-account pin, else the
-// scheduler's last selection while pool affinity is on. Use hasPool to distinguish
+// scheduler's last selection while pool affinity is on, else a best guess
+// (upstream login, then the first ready account). Use hasPool to distinguish
 // an unpooled provider from a pool with no selection; only the former can safely
 // fall back to upstream credentials. Stored account credentials resolve through
 // the integration (refreshing OAuth under the account-store lock) so consumers
@@ -73,12 +74,24 @@ export function createServiceAnnouncement(deps: AnnouncementDependencies): Servi
       providerId,
       deps.affinityKeyFor(integration, ctx, providerId),
     )
-    if (pin === undefined || (!pin.explicit && !affinity)) return undefined
-    const account = (await integration.accounts()).find(
-      candidate => candidate.id === pin.accountId,
-    )
-    if (account === undefined) return undefined
-    return { id: account.id, label: account.label, authKind: account.authKind }
+    if (pin !== undefined && (pin.explicit || affinity)) {
+      const account = (await integration.accounts()).find(
+        candidate => candidate.id === pin.accountId,
+      )
+      return account === undefined
+        ? undefined
+        : { id: account.id, label: account.label, authKind: account.authKind }
+    }
+    // No selection yet: report a best guess so followers can show something —
+    // the upstream login if ready, else the first ready account in pool order.
+    // ponytail: ignores policy (round-robin/priority may pick another on the
+    // first request); followers re-read on their next refresh.
+    const pool = (await deps.scheduler.snapshot()).providers.find(item => item.id === providerId)
+    const ready = pool?.accounts.filter(account => account.status === 'ready') ?? []
+    const guess = ready.find(account => account.id === PI_UPSTREAM_ACCOUNT_ID) ?? ready[0]
+    return guess === undefined
+      ? undefined
+      : { id: guess.id, label: guess.label, authKind: guess.authKind }
   }
 
   return {
