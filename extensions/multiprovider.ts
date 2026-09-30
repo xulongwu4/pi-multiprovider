@@ -663,8 +663,11 @@ export default async function multiprovider(pi: ExtensionAPI): Promise<void> {
 
   // Announced on MULTIPROVIDER_SERVICE_EVENT so sibling extensions can follow
   // the session's active pooled account; re-emitted at factory load and on
-  // session start with the same stable object.
+  // each reconciliation with the same stable object.
+  let reconciled = false
+  let pendingReconciles = 0
   const announcement = createServiceAnnouncement({
+    isReady: () => reconciled && pendingReconciles === 0,
     scheduler: service,
     getIntegration: effectiveIntegration,
     getBaseProvider: (providerId, ctx) =>
@@ -1026,25 +1029,42 @@ export default async function multiprovider(pi: ExtensionAPI): Promise<void> {
   }
 
   const reconcile = async (ctx: ExtensionContext): Promise<void> => {
-    service.updateSchedulerDefaults(await store.getSchedulerSettings())
-    await refreshVirtual()
-    await refreshManaged(ctx)
-    const ids = new Set([
-      ...externalIntegrations.keys(),
-      ...managedIntegrations.keys(),
-      ...installedProviders.keys(),
-    ])
-    for (const providerId of ids) await install(providerId, ctx)
-    await refreshVirtual()
-    await applyRecordedPins(ctx)
+    pendingReconciles++
+    announceService()
+    try {
+      service.updateSchedulerDefaults(await store.getSchedulerSettings())
+      await refreshVirtual()
+      await refreshManaged(ctx)
+      const ids = new Set([
+        ...externalIntegrations.keys(),
+        ...managedIntegrations.keys(),
+        ...installedProviders.keys(),
+      ])
+      for (const providerId of ids) await install(providerId, ctx)
+      await refreshVirtual()
+      await applyRecordedPins(ctx)
+      reconciled = true
+    } catch (error) {
+      reconciled = false
+      throw error
+    } finally {
+      pendingReconciles--
+      announceService()
+    }
   }
 
-  const unsubscribeRegistration = pi.events.on(MULTIPROVIDER_REGISTER_EVENT, value => {
+  const unsubscribeRegistration = pi.events.on(MULTIPROVIDER_REGISTER_EVENT, async value => {
     if (!isIntegration(value)) return
     const existing = externalIntegrations.get(value.id)
     if (existing === value) return
     externalIntegrations.set(value.id, value)
-    if (currentContext !== undefined) void install(value.id, currentContext)
+    if (currentContext !== undefined) {
+      try {
+        await reconcile(currentContext)
+      } catch (error) {
+        currentContext?.ui.notify(`multiprovider: ${errorText(error)}`, 'error')
+      }
+    }
   })
 
   pi.on('session_start', async (_event, ctx) => {
@@ -1054,7 +1074,6 @@ export default async function multiprovider(pi: ExtensionAPI): Promise<void> {
     pendingInheritedSessionPins = inheritedSessionPinsFromEnv(process.env)
       .filter((pin: InheritedSessionPin) => !recordedPools.has(pin.pool))
     await reconcile(ctx)
-    announceService()
   })
 
   pi.on('before_agent_start', async (_event, ctx) => {
@@ -1063,6 +1082,7 @@ export default async function multiprovider(pi: ExtensionAPI): Promise<void> {
   })
 
   pi.on('session_shutdown', () => {
+    reconciled = false
     unsubscribeRegistration()
     for (const providerId of installedProviders.keys()) restoreProvider(providerId, currentContext)
     managedIntegrations.clear()

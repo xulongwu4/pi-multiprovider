@@ -1,6 +1,6 @@
 import type { Api, Model, Provider } from '@earendil-works/pi-ai'
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createServiceAnnouncement } from '../src/announcement.ts'
 import {
   MultiProviderService,
@@ -48,7 +48,7 @@ function makeHarness(options: {
     randomInt: () => 1,
     randomId: () => 'lease-1',
   })
-  scheduler.registerProvider({
+  const unregister = scheduler.registerProvider({
     id: 'example',
     label: 'Example',
     accounts: () => accounts,
@@ -71,7 +71,7 @@ function makeHarness(options: {
     getBaseProvider: () => provider,
     affinityKeyFor: () => 'session-1',
   })
-  return { scheduler, announcement, ctx }
+  return { scheduler, announcement, ctx, integration, unregister }
 }
 
 describe('service announcement', () => {
@@ -85,6 +85,7 @@ describe('service announcement', () => {
       authKind: 'oauth',
     })
     expect(await announcement.resolveActiveAccountAuth('example', ctx)).toEqual({
+      accountId: 'a',
       accessToken: 'token-a',
       label: 'Work',
       source: 'Work · Test OAuth',
@@ -120,6 +121,7 @@ describe('service announcement', () => {
     })
     await header.scheduler.pinAccount('example', 'session-1', 'a')
     expect(await header.announcement.resolveActiveAccountAuth('example', header.ctx)).toEqual({
+      accountId: 'a',
       accessToken: 'header-token',
       label: 'Work',
     })
@@ -156,5 +158,33 @@ describe('service announcement', () => {
     const { announcement, ctx } = makeHarness({})
     expect(await announcement.getActiveAccount('missing', ctx)).toBeUndefined()
     expect(await announcement.resolveActiveAccountAuth('missing', ctx)).toBeUndefined()
+  })
+
+  it('reports pool presence before first selection, independently of affinity', async () => {
+    const { scheduler, announcement, ctx, unregister, integration } = makeHarness({ affinity: false })
+    const readAccounts = vi.spyOn(integration, 'accounts')
+    const resolveAuth = vi.spyOn(integration, 'resolveAuth')
+    expect(announcement.hasPool?.('example')).toBe(true)
+    expect(announcement.hasPool?.('missing')).toBe(false)
+    expect(readAccounts).not.toHaveBeenCalled()
+    expect(resolveAuth).not.toHaveBeenCalled()
+    expect(await announcement.getActiveAccount('example', ctx)).toBeUndefined()
+    scheduler.registerProvider({ id: 'scheduler-only', label: 'Only', accounts: () => accounts })
+    expect(announcement.hasPool?.('scheduler-only')).toBe(false)
+    unregister()
+    expect(announcement.hasPool?.('example')).toBe(false)
+  })
+
+  it('binds returned identity to the credential even if selection changes during refresh', async () => {
+    const { scheduler, announcement, ctx, integration } = makeHarness()
+    await scheduler.pinAccount('example', 'session-1', 'a')
+    vi.spyOn(integration, 'resolveAuth').mockImplementationOnce(async account => {
+      await scheduler.pinAccount('example', 'session-1', 'b')
+      return { auth: { apiKey: 'token-' + account.id } }
+    })
+    expect(await announcement.resolveActiveAccountAuth('example', ctx)).toEqual({
+      accountId: 'a', accessToken: 'token-a', label: 'Work',
+    })
+    expect(await announcement.getActiveAccount('example', ctx)).toMatchObject({ id: 'b' })
   })
 })

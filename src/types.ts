@@ -289,6 +289,9 @@ export interface ActiveAccount {
 }
 
 export interface ActiveAccountAuth {
+  /** Identity of the account whose credential was resolved, even if selection changes.
+   * Older service implementations may omit it. */
+  accountId?: string
   accessToken: string
   label: string
   source?: string
@@ -301,6 +304,10 @@ export interface ActiveAccountChangedEvent {
 }
 
 export interface MultiProviderServiceAnnouncement {
+  /** Whether a pool is registered and has an integration, independent of session selection.
+   * Undefined means initialization/reconciliation is incomplete, not no pool.
+   * Optional for compatibility with older service implementations. */
+  hasPool?(providerId: string): boolean | undefined
   getActiveAccount(
     providerId: string,
     ctx: MultiProviderServiceContext,

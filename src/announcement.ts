@@ -13,6 +13,8 @@ import type {
 } from './types.ts'
 
 export interface AnnouncementDependencies {
+  /** Omit for already-initialized standalone schedulers. */
+  isReady?(): boolean
   scheduler: MultiProviderService
   getIntegration(providerId: string): MultiProviderIntegration<Api, unknown> | undefined
   getBaseProvider(
@@ -47,10 +49,11 @@ function bearerTokenFromHeaders(headers: ProviderHeaders | undefined): string | 
 
 // Builds the in-process service announced on MULTIPROVIDER_SERVICE_EVENT. The
 // active account is the session's explicit /switch-account pin, else the
-// scheduler's last selection while pool affinity is on; undefined means the
-// caller should fall back to its own upstream credential resolution. Stored
-// account credentials resolve through the integration (refreshing OAuth under
-// the account-store lock) so consumers never read the private store directly.
+// scheduler's last selection while pool affinity is on. Use hasPool to distinguish
+// an unpooled provider from a pool with no selection; only the former can safely
+// fall back to upstream credentials. Stored account credentials resolve through
+// the integration (refreshing OAuth under the account-store lock) so consumers
+// never read the private store directly.
 export function createServiceAnnouncement(deps: AnnouncementDependencies): ServiceAnnouncementHandle {
   const listeners = new Map<string, Set<(event: ActiveAccountChangedEvent) => void>>()
 
@@ -79,6 +82,10 @@ export function createServiceAnnouncement(deps: AnnouncementDependencies): Servi
   }
 
   return {
+    hasPool(providerId) {
+      if (deps.isReady?.() === false) return undefined
+      return deps.getIntegration(providerId) !== undefined && deps.scheduler.hasProvider(providerId)
+    },
     async getActiveAccount(providerId, ctx) {
       return activeAccount(providerId, ctx)
     },
@@ -104,6 +111,7 @@ export function createServiceAnnouncement(deps: AnnouncementDependencies): Servi
         const accessToken = resolution.auth.apiKey ?? bearerTokenFromHeaders(resolution.auth.headers)
         if (accessToken === undefined || accessToken.trim() === '') return undefined
         return {
+          accountId: account.id,
           accessToken: accessToken.trim(),
           label: active.label,
           ...(resolution.source === undefined ? {} : { source: resolution.source }),

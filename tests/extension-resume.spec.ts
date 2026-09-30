@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createProvider, normalizeContext, type Model, type Provider } from '@earendil-works/pi-ai'
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 // The extension reads its credential store and the session manager at load and
 // session start, so the harness points Pi's agent dir at a scratch directory
@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest'
 const agentDir = mkdtempSync(join(tmpdir(), 'pi-multiprovider-resume-'))
 process.env.PI_CODING_AGENT_DIR = agentDir
 
-const { MULTIPROVIDER_SERVICE_EVENT } = await import('../src/types.ts')
+const { MULTIPROVIDER_SERVICE_EVENT, MULTIPROVIDER_REGISTER_EVENT } = await import('../src/types.ts')
 const { MultiAuthStore, SESSION_PIN_ENTRY_TYPE } = await import('../src/index.ts')
 const { default: multiprovider } = await import('../extensions/multiprovider.ts')
 
@@ -55,6 +55,7 @@ interface AccountChangedEvent {
 }
 
 interface Announcement {
+  hasPool(providerId: string): boolean | undefined
   getActiveAccount(providerId: string, ctx: ExtensionContext): Promise<unknown>
   onActiveAccountChanged(
     providerId: string,
@@ -63,6 +64,7 @@ interface Announcement {
 }
 
 interface ExtensionHarness {
+  poolStates: (boolean | undefined)[]
   entries: unknown[]
   notifications: string[]
   providers: Provider<'probe-api'>[]
@@ -71,6 +73,8 @@ interface ExtensionHarness {
   active(poolId: string): Promise<unknown>
   start(): Promise<void>
   stop(): Promise<void>
+  hasPool(poolId: string): boolean | undefined
+  register(): void
   switchAccount(args: string): Promise<void>
 }
 
@@ -90,6 +94,7 @@ async function launch(
   const bus = new Map<string, Set<(value: unknown) => void>>()
   const commands = new Map<string, { handler: (args: string, ctx: unknown) => Promise<void> }>()
   const accountChanges: AccountChangedEvent[] = []
+  const poolStates: (boolean | undefined)[] = []
   let announcement: Announcement | undefined
   let unsubscribeAccountChanges: (() => void) | undefined
 
@@ -163,6 +168,7 @@ async function launch(
   // object, so the identity check keeps the change subscription attached once.
   bus.set(MULTIPROVIDER_SERVICE_EVENT, new Set([(value: unknown) => {
     const service = value as Announcement
+    poolStates.push(service.hasPool('example'))
     if (service === announcement || typeof service?.onActiveAccountChanged !== 'function') return
     unsubscribeAccountChanges?.()
     announcement = service
@@ -176,10 +182,18 @@ async function launch(
   return {
     entries,
     providers,
+    poolStates,
     notifications,
     accountChanges,
     ctx,
     active: poolId => announcement!.getActiveAccount(poolId, ctx),
+    hasPool: poolId => announcement!.hasPool(poolId),
+    register() {
+      pi.events.emit(MULTIPROVIDER_REGISTER_EVENT, {
+        id: 'external-fixture', label: 'External fixture',
+        accounts: () => [], resolveAuth: async () => ({ auth: {} }),
+      })
+    },
     async start() {
       ctx.model = model
       for (const handler of handlers.get('session_start') ?? []) {
@@ -319,6 +333,49 @@ describe('/switch-account survival across resume', () => {
       if (previous === undefined) delete process.env.PI_MULTIPROVIDER_SESSION_PINS
       else process.env.PI_MULTIPROVIDER_SESSION_PINS = previous
     }
+  })
+  it('announces unknown pool presence until session reconciliation completes', async () => {
+    const h = await launch([])
+    expect(h.poolStates).toEqual([undefined])
+    await h.start()
+    expect(h.poolStates).toEqual([undefined, undefined, true])
+  })
+
+  it('keeps pool presence unknown after failed reconciliation and recovers on retry', async () => {
+    const h = await launch([])
+    const readSettings = vi.spyOn(MultiAuthStore.prototype, 'getSchedulerSettings')
+      .mockRejectedValueOnce(new Error('fixture initialization failure'))
+    try {
+      await expect(h.start()).rejects.toThrow('fixture initialization failure')
+      expect(h.poolStates).toEqual([undefined, undefined, undefined])
+      await h.start()
+      expect(h.poolStates.at(-1)).toBe(true)
+    } finally {
+      readSettings.mockRestore()
+    }
+  })
+
+  it('reports external registration errors without an unhandled rejection', async () => {
+    const h = await launch([])
+    await h.start()
+    const readSettings = vi.spyOn(MultiAuthStore.prototype, 'getSchedulerSettings')
+      .mockRejectedValueOnce(new Error('fixture registration failed'))
+    try {
+      h.register()
+      await vi.waitFor(() => expect(h.notifications.some(message => message.includes('fixture registration failed'))).toBe(true))
+      expect(h.hasPool('example')).toBeUndefined()
+    } finally {
+      readSettings.mockRestore()
+      await h.stop()
+    }
+  })
+
+  it('leaves pool presence unknown after shutdown rather than claiming no pool', async () => {
+    const h = await launch([])
+    await h.start()
+    expect(h.hasPool('example')).toBe(true)
+    await h.stop()
+    expect(h.hasPool('example')).toBeUndefined()
   })
 
   it('hands the registry to the newest live lift in whatever order sessions end', async () => {
