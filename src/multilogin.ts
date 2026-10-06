@@ -4,6 +4,7 @@ import type {
   AuthPrompt,
   AuthType,
   Credential,
+  LoginOptions,
   Provider,
   ProviderAuthInteraction,
 } from '@earendil-works/pi-ai'
@@ -11,6 +12,7 @@ import {
   ExtensionSelectorComponent,
   LoginDialogComponent,
   OAuthSelectorComponent,
+  SettingsManager,
   type ExtensionContext,
 } from '@earendil-works/pi-coding-agent'
 import { Container, type Focusable, type TUI } from '@earendil-works/pi-tui'
@@ -329,6 +331,7 @@ async function promptDialog(
 export async function loginCredential(
   selection: LoginSelection,
   interaction: ProviderAuthInteraction,
+  options?: LoginOptions,
 ): Promise<Credential> {
   const method = selection.authType === 'oauth'
     ? selection.provider.auth.oauth
@@ -336,7 +339,7 @@ export async function loginCredential(
   if (method?.login === undefined) {
     throw new Error(`No ${selection.authType} login method for ${selection.provider.name}`)
   }
-  return method.login(interaction)
+  return method.login(interaction, options)
 }
 
 export async function promptApiKeyCredential(
@@ -384,7 +387,14 @@ export async function showLoginDialog(
     }
 
     queueMicrotask(() => {
-      loginCredential(selection, interaction)
+      // OpenAI's ChatGPT OAuth registers this installation by Pi's device ID, as /login does.
+      // ponytail: separate SettingsManager; if this mints the first deviceId, a later Pi /login in the same process
+      // may write a different one. Harmless for refresh (uses clientId); fix needs Pi to expose its settingsManager.
+      const loginOptions: LoginOptions = {
+        getDeviceId: () =>
+          SettingsManager.create(ctx.cwd, undefined, { projectTrusted: ctx.isProjectTrusted() }).getOrCreateDeviceId(),
+      }
+      loginCredential(selection, interaction, loginOptions)
         .then(credential => finish({ credential }))
         .catch(error => {
           const normalized = errorFrom(error)

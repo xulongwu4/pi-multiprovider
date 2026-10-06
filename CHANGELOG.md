@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Support the built-in `openai` provider's "Sign in with ChatGPT" OAuth in `/multilogin` and reauthentication by forwarding Pi's installation device ID (`LoginOptions.getDeviceId`) to provider login flows.
 - Expose optional `hasPool(providerId)` on the cross-extension service so consumers can distinguish unpooled providers from pools without session selections, without reading private account storage. Return `undefined` until reconciliation completes rather than falsely claiming no pool exists.
 - Announce the stable service object before and after reconciliation (including pool additions/removals). Consumers should refresh even when the service object is unchanged.
 - Catch and report external-registration reconciliation failures rather than leaving rejected promises unhandled. Clear readiness on session shutdown.

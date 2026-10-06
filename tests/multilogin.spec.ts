@@ -128,6 +128,29 @@ describe('/multilogin provider auth', () => {
     expect(events.map(event => event.type)).toEqual(['device_code', 'progress'])
   })
 
+  it('forwards login options so device-bound OAuth (OpenAI ChatGPT) can register the installation', async () => {
+    const deviceBound: typeof provider = {
+      ...provider,
+      auth: {
+        oauth: {
+          name: 'OpenAI (ChatGPT subscription)',
+          async login(_interaction, options) {
+            const deviceId = options?.getDeviceId?.()
+            if (deviceId === undefined) throw new Error('Sign in with ChatGPT requires a device ID')
+            return { type: 'oauth', access: deviceId, refresh: 'r', expires: Date.now() + 60_000, clientId: 'c' }
+          },
+          async refresh(credential) { return credential },
+          async toAuth(credential) { return { apiKey: credential.access } },
+        },
+      },
+    }
+    await expect(loginCredential(
+      { provider: deviceBound, authType: 'oauth' },
+      interaction([], []),
+      { getDeviceId: () => 'device-1' },
+    )).resolves.toMatchObject({ type: 'oauth', access: 'device-1', clientId: 'c' })
+  })
+
   it('LoginDialogHostComponent switches to selector for select prompt and restores dialog view', async () => {
     const renders: number[] = []
     const mockTui = {

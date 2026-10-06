@@ -102,7 +102,7 @@ function wrapOAuth(method: OAuthAuth): OAuthAuth {
     name: method.name,
     ...(method.isSubscription === undefined ? {} : { isSubscription: method.isSubscription }),
     ...(method.loginLabel === undefined ? {} : { loginLabel: method.loginLabel }),
-    login: interaction => method.login(interaction),
+    login: (interaction, options) => method.login(interaction, options),
     refresh: (credential, signal) => method.refresh(credential, signal),
     async toAuth(credential) {
       return markModelAuth(await method.toAuth(credential), true)
