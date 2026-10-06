@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.11.0
 
 - Support the built-in `openai` provider's "Sign in with ChatGPT" OAuth in `/multilogin` and reauthentication by forwarding Pi's installation device ID (`LoginOptions.getDeviceId`) to provider login flows.
 - Expose optional `hasPool(providerId)` on the cross-extension service so consumers can distinguish unpooled providers from pools without session selections, without reading private account storage. Return `undefined` until reconciliation completes rather than falsely claiming no pool exists.
