@@ -357,6 +357,16 @@ export function liftProvider<TApi extends Api, TCredentialRef = unknown>(
     ...(provider.filterModels === undefined
       ? {}
       : { filterModels: (models, credential) => provider.filterModels!(models, credential) }),
+    // Non-chat models and their requests pass through unpooled; dropping them would remove
+    // the provider's classifier and image models from Pi's catalog.
+    ...(provider.getAllModels === undefined
+      ? {}
+      : { getAllModels: () => provider.getAllModels!() }),
+    ...(provider.filterAllModels === undefined
+      ? {}
+      : { filterAllModels: (models, credential) => provider.filterAllModels!(models, credential) }),
+    ...(provider.classify === undefined ? {} : { classify: provider.classify }),
+    ...(provider.generateImages === undefined ? {} : { generateImages: provider.generateImages }),
     stream<T extends TApi>(
       model: Model<T>,
       context: TranscriptContext,

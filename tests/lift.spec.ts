@@ -141,6 +141,21 @@ function setup(
 }
 
 describe('liftProvider', () => {
+  it('keeps non-chat models and their capabilities from the base provider', () => {
+    const classifier = { type: 'classifier' as const, id: 'judge', name: 'Judge', api: 'test-classifier', provider: model.provider, baseUrl: model.baseUrl, input: ['text' as const], contextWindow: 1_000, cost: model.cost }
+    const classify = async () => ({ api: 'test-classifier', provider: model.provider, model: 'judge', answers: {}, stopReason: 'stop' as const, timestamp: 0 })
+    const generateImages = async () => ({ api: 'test-images', provider: model.provider, model: 'paint', output: [], stopReason: 'stop' as const, timestamp: 0 })
+    const filterAllModels = <T,>(models: readonly T[]) => models
+    const base = { ...baseProvider(() => createAssistantMessageEventStream()), getAllModels: () => [model, classifier], filterAllModels, classify, generateImages }
+    const lifted = liftProvider(base, new MultiProviderService(), { resolveAuth: () => ({ auth: {} }) })
+    expect(lifted.getAllModels?.()).toEqual([model, classifier])
+    expect(lifted.filterAllModels).toBeTypeOf('function')
+    expect(lifted.classify).toBe(classify)
+    expect(lifted.generateImages).toBe(generateImages)
+    expect(liftProvider(baseProvider(() => createAssistantMessageEventStream()), new MultiProviderService(), { resolveAuth: () => ({ auth: {} }) }))
+      .not.toHaveProperty('classify')
+  })
+
   it('rotates auth before output without changing provider or model identity', async () => {
     const attempts: Array<{
       provider: string
