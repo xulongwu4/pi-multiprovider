@@ -666,8 +666,10 @@ export default async function multiprovider(pi: ExtensionAPI): Promise<void> {
   // each reconciliation with the same stable object.
   let reconciled = false
   let pendingReconciles = 0
+  let reconciliationGeneration = 0
   const announcement = createServiceAnnouncement({
     isReady: () => reconciled && pendingReconciles === 0,
+    getGeneration: () => reconciliationGeneration,
     scheduler: service,
     getIntegration: effectiveIntegration,
     getBaseProvider: (providerId, ctx) =>
@@ -1029,6 +1031,7 @@ export default async function multiprovider(pi: ExtensionAPI): Promise<void> {
   }
 
   const reconcile = async (ctx: ExtensionContext): Promise<void> => {
+    reconciliationGeneration++
     pendingReconciles++
     announceService()
     try {

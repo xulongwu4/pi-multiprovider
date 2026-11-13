@@ -2,6 +2,7 @@ import { normalizeContext } from '@earendil-works/pi-ai'
 import type { Api, Provider, ProviderHeaders } from '@earendil-works/pi-ai'
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent'
 import { PI_UPSTREAM_ACCOUNT_ID } from './managed.ts'
+import { runAccountRequest } from './request.ts'
 import type { MultiProviderService } from './service.ts'
 import type {
   ActiveAccount,
@@ -15,6 +16,8 @@ import type {
 export interface AnnouncementDependencies {
   /** Omit for already-initialized standalone schedulers. */
   isReady?(): boolean
+  /** Increment whenever reconciliation begins, including same-integration updates. */
+  getGeneration?(): number
   scheduler: MultiProviderService
   getIntegration(providerId: string): MultiProviderIntegration<Api, unknown> | undefined
   getBaseProvider(
@@ -95,8 +98,10 @@ export function createServiceAnnouncement(deps: AnnouncementDependencies): Servi
   }
 
   return {
+    runWithAccount: (providerId, ctx, options, request) =>
+      runAccountRequest(deps, providerId, ctx, options, request),
     hasPool(providerId) {
-      if (deps.isReady?.() === false) return undefined
+      if (deps.isReady !== undefined && deps.isReady() !== true) return undefined
       return deps.getIntegration(providerId) !== undefined && deps.scheduler.hasProvider(providerId)
     },
     async getActiveAccount(providerId, ctx) {

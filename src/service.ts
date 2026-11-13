@@ -87,7 +87,7 @@ function defaultDisposition(failure: ProviderAttemptFailure): FailureDisposition
   if (status === 401 || status === 403 || /unauthorized|forbidden|invalid.*(?:token|api.?key|auth|grant)|(?:token|credential).*(?:expired|invalid)/.test(message)) {
     return { kind: 'auth', retryable: true }
   }
-  if (status !== undefined && (status >= 500 || status === 408 || status === 425)) {
+  if ((status === undefined && failure.code === 'NETWORK_ERROR') || (status !== undefined && (status >= 500 || status === 408 || status === 425))) {
     return { kind: 'transient', retryable: true }
   }
   return { kind: 'fatal', retryable: false }
@@ -228,9 +228,10 @@ export class MultiProviderService {
     }
   }
 
-  async snapshot(): Promise<MultiProviderSnapshot> {
+  async snapshot(providerId?: string): Promise<MultiProviderSnapshot> {
     const providers: PublicPoolSnapshot[] = []
     for (const registration of this.providers.values()) {
+      if (providerId !== undefined && registration.id !== providerId) continue
       const pool = this.pool(registration.id)
       const effective = await this.effectiveAccounts(registration, pool)
       const now = this.now()
@@ -512,8 +513,14 @@ export class MultiProviderService {
     const runtime = this.runtimeFor(registration.id, account.id)
     runtime.consecutiveFailures += 1
     runtime.lastFailureKind = disposition.kind
+    const retryAfter = failure.headers?.['retry-after']
+    const retryAt = retryAfter === undefined ? NaN
+      : /^\d+(?:\.\d+)?$/.test(retryAfter) ? this.now() + Number(retryAfter) * 1_000
+      : Date.parse(retryAfter)
     const cooldown = disposition.cooldownMs
-      ?? this.defaultCooldown(disposition.kind, runtime.consecutiveFailures)
+      ?? (disposition.retryable && Number.isFinite(retryAt)
+        ? Math.max(0, retryAt - this.now())
+        : this.defaultCooldown(disposition.kind, runtime.consecutiveFailures))
     runtime.cooldownUntil = Math.max(
       runtime.cooldownUntil,
       this.now() + Math.min(this.defaults.maxCooldownMs, Math.max(0, cooldown)),

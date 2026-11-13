@@ -324,4 +324,19 @@ describe('MultiProviderService', () => {
     service.clearAffinity()
     expect(service.getAffinity('example', 'session-1')).toBeUndefined()
   })
+
+  it('does not treat a network code as retryable when HTTP status is fatal', async () => {
+    const service = scheduler()
+    const lease = await service.acquire({ providerId: 'example' })
+    expect(lease.release({ status: 'failure', error: { ...failure(400), code: 'NETWORK_ERROR' } }))
+      .toEqual({ kind: 'fatal', retryable: false })
+  })
+
+  it.each([['120', 121_000], ['9999999999', 3_601_000], ['invalid', 61_000]])(
+    'bounds retry-after cooldown %s for direct scheduler callers', async (value, expected) => {
+      const service = scheduler({ now: () => 1_000 })
+      const lease = await service.acquire({ providerId: 'example' })
+      lease.release({ status: 'failure', error: { ...failure(429), headers: { 'retry-after': value } } })
+      expect((await service.snapshot()).providers[0]!.accounts[0]!.cooldownUntil).toBe(expected)
+    })
 })

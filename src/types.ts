@@ -3,6 +3,7 @@ import type {
   AssistantMessage,
   AuthResult,
   Model,
+  ModelAuth,
   Provider,
   ProviderAuth,
   StreamOptions,
@@ -23,6 +24,7 @@ export type SelectionBias = 'first-account' | 'none'
 export interface ProviderAttemptFailure {
   message: string
   status?: number
+  code?: 'NETWORK_ERROR'
   headers?: Readonly<Record<string, string>>
   assistantMessage?: AssistantMessage
   cause?: unknown
@@ -308,6 +310,15 @@ export interface MultiProviderServiceAnnouncement {
    * Undefined means initialization/reconciliation is incomplete, not no pool.
    * Optional for compatibility with older service implementations. */
   hasPool?(providerId: string): boolean | undefined
+  /** Run a non-streaming request through the shared pool. The caller owns the deadline.
+   * Retries only unattempted eligible accounts when the scheduler permits it.
+   * Optional for compatibility with older service implementations. */
+  runWithAccount?<T>(
+    providerId: string,
+    ctx: MultiProviderServiceContext,
+    options: { signal: AbortSignal; modelId: string },
+    request: (account: { accountId: string; auth: ModelAuth; signal: AbortSignal }) => Promise<T>,
+  ): Promise<T>
   getActiveAccount(
     providerId: string,
     ctx: MultiProviderServiceContext,
